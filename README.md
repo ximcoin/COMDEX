@@ -1,6 +1,6 @@
 # COMDEX
 Source code to the [COMDEX.io](https://comdex.io) single html file wallet and commodity trading tool. The philosophy  behind COMDEX is to provide a simple transparent commodity marketplace on the Stellar network where genuinely redeemable takoenized assets on the SDEX can be bought, traded and speculated on according to their international market spot price.
-For your personal key security please audit this html & javascript code both visually and by subnitting to AI before saving and running the COMDEX tool in any web browser.
+For your personal key security please audit this html & javascript code both visually after saving the files and running the COMDEX tool in any web browser. You should also submit your copy of comdex_v1.html to https://virustotal.com and other malicious behavior scanners like https://urlscan.io
 
 To audit the code simply scroll through and make sure that there are no URLs in there which link to anything other than the 
 stellar.org horizon, comdex.io, stellarlite.io, highcharts.com & cloudflare.com
