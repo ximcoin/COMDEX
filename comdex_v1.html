@@ -646,17 +646,22 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 			server.loadAccount(kp.publicKey())
 				.then(function (acct) {
 					cb(acct);
-					$('#key_input').hide();
-					$("#wallet").fadeIn("slow");
-					$(".tbutton").fadeIn("slow");
-					$("#displaypubkey").html(kp.publicKey()+'&nbsp;&nbsp;&nbsp;&nbsp;').show(); //
-				})
-				.catch(StellarSdk.NotFoundError, function (err) {
-					$("#warning").show().html('<font color="FF0000"><b>Account empty: You must first fund your account with Stellar Lumens (XLM)</b></font>');
+					if (acct.signers && acct.signers.length > 1) {
+						showSuccess(null, 'Warning: this account has '+acct.signers.length+' signing keys — login blocked', false, 'error');
+					} else {
+						$('#key_input').hide();
+						$("#wallet").fadeIn("slow");
+						$(".tbutton").fadeIn("slow");
+						$("#displaypubkey").html(kp.publicKey()+'&nbsp;&nbsp;&nbsp;&nbsp;').show();
+					}
 				})
 				.catch(function (err) {
-					$("#warning").show().html('<font color="FF0000"><b>Key failed</b></font>');
-					console.log("error: "+err);
+					if (err && err.response && err.response.status === 404) {
+						$("#warning").show().html('<font color="FF0000"><b>Account empty: You must first fund your account with Stellar Lumens (XLM)</b></font>');
+					} else {
+						$("#warning").show().html('<font color="FF0000"><b>Key failed</b></font>');
+						console.log("error: "+err);
+					}
 				});
 		},
 		fetchBalance: function () {
@@ -673,11 +678,11 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 				var _total_buy_usd = 0; var _total_sell_usd = 0;
 				var _buyother_val = $("#buyother").val() || "";
 				var _sellother_val = $("#sellother").val() || "";
-				var stellarfee = 1.5; // extra half lumen for safety margin
+				var stellarlocked = 1.5; // extra half lumen for safety margin
 				for (var i = 0; i < balances.length; i++) {
 					var b = balances[i];
 					if (b.asset_type !== "native") {
-						stellarfee += 0.5; // asset fee
+						stellarlocked += 0.5; // asset fee
 						$("#"+b.asset_code+"_owns").html("Redeem");
 						$("#create"+b.asset_code+"tl").html("-").attr('title', 'Remove '+b.asset_code+' trustline');
 						$("#create"+b.asset_code+"tl").removeClass('w3-grey').addClass('w3-light-grey');
@@ -703,13 +708,29 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 						if ($("#cur-type").val() == "USD") $("#val_xlm_text").html('$'+$("#val_xlm_text").html());
 						if ($("#cur-type").val() == "EURO") $("#val_xlm_text").html('€'+$("#val_xlm_text").html());
 						if ($("#cur-type").val() == "YUAN") $("#val_xlm_text").html('¥'+$("#val_xlm_text").html());
-						$("#val_XLM").val((b.balance - stellarfee).toFixed(7));
+						$("#val_XLM_native").val(parseFloat(b.balance));
+						$("#val_XLM_liabilities").val(parseFloat(b.selling_liabilities || 0));
+						var xlm_locked = parseFloat(b.selling_liabilities || 0);
+						var xlm_avail = Math.max(0, Math.trunc((b.balance - stellarlocked - xlm_locked) * 1e7) / 1e7);
+						$("#val_XLM").val(xlm_avail);
+						var curSymbol = {"USD":"$","EURO":"€","YUAN":"¥"}[$("#cur-type").val()] || '';
+						$("#val_xlm_text_avail").html(' <font size="2">('+stellarlocked+' locked) '+xlm_avail+' XLM or '+curSymbol+Math.trunc(cur(xlm_avail) * 100) / 100+' available to use</font>');
+						$(".ototal").html(boldNumbersBeforeDecimal(cur(xlm_avail))+' '+$("#cur-type").val());
 					}
 				}
 				$("#val_trustlines").html(trust_buttons);
 				$("#trust_row").show();
 				if (offer_exist) {
 					server.offers().forAccount($("#pubkey").val()).call().then(function(offer_obj) {
+					// Recalculate xlm_avail now we know the offer count — each offer needs 0.5 XLM subentry reserve
+					var _nativeBal = parseFloat($("#val_XLM_native").val());
+					var _xlmLiabilities = parseFloat($("#val_XLM_liabilities").val());
+					var xlm_avail_final = Math.max(0, Math.trunc((_nativeBal - stellarlocked - (offer_obj.records.length * 0.5) - _xlmLiabilities) * 1e7) / 1e7);
+					$("#val_XLM").val(xlm_avail_final);
+					var curSymbol = {"USD":"$","EURO":"€","YUAN":"¥"}[$("#cur-type").val()] || '';
+					var totalLocked = parseFloat(stellarlocked + offer_obj.records.length * 0.5).toFixed(1);
+					$("#val_xlm_text_avail").html(' <font size="2">('+totalLocked+' locked) '+xlm_avail_final+' XLM or '+curSymbol+Math.trunc(cur(xlm_avail_final) * 100) / 100+' available to use</font>');
+					$(".ototal").html(boldNumbersBeforeDecimal(cur(xlm_avail_final))+' '+$("#cur-type").val());
 					for (let i = 0; i < offer_obj.records.length; i++) {
 						let otype = "";
 						let offerid = offer_obj.records[i].id;
@@ -820,7 +841,6 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 				} else {
 					$("#offers_row").hide();
 				}
-				$(".ototal").html(boldNumbersBeforeDecimal(cur(b.balance - stellarfee))+' '+$("#cur-type").val());
 				StellarController.checkTransactions();
 				StellarController.checkTrades();
 			});
@@ -975,9 +995,10 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 							$('#'+asset+'rowofferbar').hide();
 							console.log("Error: "+err.response);
 							if (err.response) {
-								if (err.response.data.extras.result_codes.transaction == "tx_insufficient_balance") $("#paywarning").show().html('<font color="880000"><b>Insufficient XLM lumens to add trustline, add 1 XLM</b></font>');
-								if (err.response.data.extras.result_codes.operations == "op_low_reserve") $("#paywarning").show().html('<font color="880000"><b>Insufficient XLM lumens to add trustline, add 1 XLM</b></font>');
-								if (err.response.data.extras.result_codes.operations == "op_invalid_limit") $("#paywarning").show().html('<font color="880000"><b>Account has balance stored in '+trustAsset+', transfer first </b></font>');
+								var rc = err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes;
+								if (rc && rc.transaction == "tx_insufficient_balance") $("#paywarning").show().html('<font color="880000"><b>Insufficient XLM lumens to add trustline, add 1 XLM</b></font>');
+								if (rc && rc.operations == "op_low_reserve") $("#paywarning").show().html('<font color="880000"><b>Insufficient XLM lumens to add trustline, add 1 XLM</b></font>');
+								if (rc && rc.operations == "op_invalid_limit") $("#paywarning").show().html('<font color="880000"><b>Account has balance stored in '+trustAsset+', transfer first </b></font>');
 							}
 						});
 				} else {
@@ -1002,9 +1023,10 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 						.catch(function (err) {
 							$('#'+asset+'rowofferbar').hide();
 							if (err.response) {
-								if (err.response.data.extras.result_codes.transaction == "tx_insufficient_balance") $("#paywarning").show().html('<font color="880000"><b>Insufficient XLM lumens to add trustline, add 1 XLM</b></font>');
-								if (err.response.data.extras.result_codes.operations == "op_low_reserve") $("#paywarning").show().html('<font color="880000"><b>Insufficient XLM lumens to add trustline, add 1 XLM</b></font>');
-								if (err.response.data.extras.result_codes.operations == "op_invalid_limit") $("#paywarning").show().html('<font color="880000"><b>Account has balance stored in '+trustAsset+', transfer first </b></font>');
+								var rc = err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes;
+								if (rc && rc.transaction == "tx_insufficient_balance") $("#paywarning").show().html('<font color="880000"><b>Insufficient XLM lumens to add trustline, add 1 XLM</b></font>');
+								if (rc && rc.operations == "op_low_reserve") $("#paywarning").show().html('<font color="880000"><b>Insufficient XLM lumens to add trustline, add 1 XLM</b></font>');
+								if (rc && rc.operations == "op_invalid_limit") $("#paywarning").show().html('<font color="880000"><b>Account has balance stored in '+trustAsset+', transfer first </b></font>');
 							}
 						});
 				}
@@ -1062,10 +1084,10 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 								})
 								.catch(function (err) {
 									$('#rowpaybar').hide();
+									var rc = err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes;
 									$("#paywarning").show().html('<font color="FF0000"><b>The transaction failed... please check console details</b></font><br><font color="660000">'+err+'</font>');
 									$("#paysend").fadeIn("slow");
-									console.log('An error has occured:');
-									console.log(err);
+									console.log('An error has occured:', err);
 								});
 						})
 						.catch(function (e) {
@@ -1104,6 +1126,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 										})
 										.catch(function (err) {
 											$('#rowpaybar').hide();
+											var rc = err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes;
 											$("#paywarning").show().html('<font color="FF0000"><b>The transaction failed... please check details</b></font>');
 											$("#paysend").fadeIn("slow");
 											console.log('An error has occured:');
@@ -1213,6 +1236,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 											$('#submitConvert').hide();
 											console.log('An convert error has occured:');
 											console.log(err);
+											var rc = err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes;
 											// Read Error: Unknown PublicKeyType member for value 1 -- upgrade to protocol 13
 										});
 								})
@@ -1305,8 +1329,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 										StellarController.fetchBalance();
 									})
 									.catch(function (err) {
-										console.log('An error has occured:');
-										console.log(JSON.stringify(err.response, null, 2));
+										var rc = err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes;
 										$('#'+assetid+'rowofferbar').hide();
 										if (err.response && err.response.data && err.response.data.title === 'Transaction Submission Timeout') {
 											showSuccess(assetid, 'Checking if offer was placed...', false, 'info');
@@ -1322,8 +1345,8 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 													});
 											}, 4000);
 										} else {
-											showSuccess(assetid, 'Failed: '+(err.response && err.response.data ? err.response.data.title : err.message)+', try again', false, 'error');
-											if (err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes.operations == "op_underfunded") showSuccess(assetid, 'Not enough '+fromCode+' available', true, 'warn');
+											if (rc && (Array.isArray(rc.operations) ? rc.operations : [rc.operations]).indexOf("op_underfunded") >= 0) showSuccess(assetid, 'Not enough '+fromCode+' available', true, 'warn');
+											else showSuccess(assetid, 'Failed: '+(err.response && err.response.data ? err.response.data.title : err.message)+', try again', false, 'error');
 										}
 									});
 							});
@@ -1394,11 +1417,9 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 													});
 											}, 4000);
 										} else {
-											if (err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes.operations == "op_underfunded") {
-												showSuccess(assetid, 'Not enough '+fromCode+' available', true, 'warn');
-											} else {
-												showSuccess(assetid, 'Error... check console log and try again', true, 'warn');
-											}
+											var rc = err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes;
+											if (rc && rc.operations == "op_underfunded") showSuccess(assetid, 'Not enough '+fromCode+' available', true, 'warn');
+											else showSuccess(assetid, 'Error... check console log and try again', true, 'warn');
 										}
 									});
 							});
@@ -1506,29 +1527,16 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 								if (StellarController._offerQueueCallback) { var cb = StellarController._offerQueueCallback; StellarController._offerQueueCallback = null; cb(); }
 							})
 							.catch(function (err) {
-								console.log('An error has occured:');
-								console.log('err.name:', err.name);
-								console.log('err.message:', err.message);
-								console.log('err.response:', JSON.stringify(err.response, null, 2));
 								$('#rowpaybar').hide();
-								var errMsg = 'Failed: Transaction Failed, try again';
-								try {
-									var data = err.response && err.response.data;
-									if (data && data.title) errMsg = 'Failed: '+data.title+', try again';
-									var rc = data && data.extras && data.extras.result_codes;
-									console.log('result_codes:', JSON.stringify(rc));
-									if (rc) {
-										if (rc.transaction == "tx_bad_seq") errMsg = 'Error: bad Stellar tx sequence number — login again';
-										var ops = rc.operations;
-										console.log('ops:', JSON.stringify(ops));
-										if (ops) {
-											var opArr = Array.isArray(ops) ? ops : [ops];
-											if (opArr.indexOf("op_underfunded") >= 0) errMsg = 'Not enough '+fromCode+' — offer underfunded';
-											if (opArr.indexOf("op_bad_auth") >= 0) errMsg = 'Bad auth — check your key';
-											if (opArr.indexOf("op_no_trust") >= 0) errMsg = 'No trustline for '+toCode;
-										}
-									}
-								} catch(e) { console.log('Error parsing error response:', e); }
+								var rc = err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes;
+								var errMsg = err.response && err.response.data && err.response.data.title ? 'Failed: '+err.response.data.title+', try again' : 'Failed: Transaction Failed, try again';
+								if (rc) {
+									if (rc.transaction == "tx_bad_seq") errMsg = 'Error: bad Stellar tx sequence number — login again';
+									var ops = Array.isArray(rc.operations) ? rc.operations : (rc.operations ? [rc.operations] : []);
+									if (ops.indexOf("op_underfunded") >= 0) errMsg = 'Not enough '+fromCode+' — offer underfunded';
+									if (ops.indexOf("op_bad_auth") >= 0) errMsg = 'Bad auth — check your key';
+									if (ops.indexOf("op_no_trust") >= 0) errMsg = 'No trustline for '+toCode;
+								}
 								showSuccess(assetid, errMsg, false, 'error');
 								if (StellarController._offerQueueCallback) { var cb = StellarController._offerQueueCallback; StellarController._offerQueueCallback = null; cb(); }
 							});
@@ -2069,11 +2077,13 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 		});
 		$(document).on("click", ".ototal", function (event) { // cash balance
 			var asset_id = $(this).attr('id').split("-");
-			$('#'+asset_id[0]+'-b-total').val(cur($("#val_XLM").val()));
-			var amountsum = (parseFloat($('#'+asset_id[0]+'-b-total').val()) / parseFloat($('#'+asset_id[0]+'-b-price').val()));
+			var xlm_avail = parseFloat($("#val_XLM").val());
+			var total_cur = Math.max(0, Math.trunc(cur(xlm_avail) * 100) / 100);
+			$('#'+asset_id[0]+'-b-total').val(total_cur);
+			var amountsum = (parseFloat(total_cur) / parseFloat($('#'+asset_id[0]+'-b-price').val()));
 			if ($('#'+asset_id[0]+'-b-price').val() != "") {
 				$('#'+asset_id[0]+'-b-amount').val(parseFloat(amountsum.toFixed(7)));
-				$('#'+asset_id[0]+'butbtext').html("Buy "+$('#'+asset_id[0]+'-b-amount').val()+" "+asset_id[0]+" for "+$('#'+asset_id[0]+'-b-total').val().toFixed(7)+" "+$("#cur-type").val());
+				$('#'+asset_id[0]+'butbtext').html("Buy "+$('#'+asset_id[0]+'-b-amount').val()+" "+asset_id[0]+" for "+total_cur+" "+$("#cur-type").val());
 			}
 		});
 		$(document).on("click", ".oasset", function (event) { // asset balance
@@ -2327,6 +2337,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 					class="w3-container w3-card-4 w3-light-grey w3-text-black w3-margin w3-padding">
 					<input id="cur-type" type="hidden" value="USD"><input id="cur-val" type="hidden" value="">
 					<input id="syncval" type="hidden" value="60000"><input id="scopeval" type="hidden" value="60">
+					<input id="val_XLM_native" type="hidden" value=""><input id="val_XLM_liabilities" type="hidden" value="">
 					<input id="store-b-price" type="hidden" value=""><input id="store-b-amount" type="hidden"
 						value=""><input id="store-b-total" type="hidden" value=""><input id="store-b-text" type="hidden"
 						value="">
@@ -2342,7 +2353,8 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 					<button id="tradehistory" title="History of buy / sell trades" style="display:none;" class="w3-button w3-round-large w3-right w3-grey">Trades</button>
 					<h2 class="w3-left">Wallet <input type="button" id="asset_CUR"
 							class="w3-round w3-grey" value="USD:"> <span
-							id="val_xlm_text"></span><input type="hidden" id="val_XLM" value=""></h2>
+							id="val_xlm_text"></span><span
+							id="val_xlm_text_avail"></span><input type="hidden" id="val_XLM" value=""></h2>
 					<div class="w3-row w3-section" id="merge_row" style="display:none;">
 						<div class="w3-col" style="width:90px"><b>CLOSE<br>ACCOUNT</b></div>
 						<div class="w3-rest"><b class="w3-red w3-large w3-padding">BEWARE! This will sell all assets at
