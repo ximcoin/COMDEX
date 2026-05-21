@@ -247,6 +247,8 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 	// Locked USD prices for strategy 30, keyed by offer ID — persists across DOM re-renders
 	var _usdlock_b = {};
 	var _usdlock_s = {};
+	var _auto_b_store = {}; // offerid -> "offerid-asset-amount-strategy" — survives DOM redraws
+	var _auto_s_store = {}; // offerid -> "offerid-asset-amount-strategy" — survives DOM redraws
 
 	// XLM price to submit for upauto, set by strategy 30 to bypass the DOM field read in offerAsset
 	var _upautoXlmPrice = null;
@@ -299,10 +301,14 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 	function autoBuyChange(autoid, autoasset, autoamount, usdprice) {
 		var bval = $("#autoBuySelect-"+autoid).val();
 		if (bval == 12 || bval == 13) { $("#buyother-"+autoid).show(); } else { $("#buyother-"+autoid).hide(); }
-		if (bval == 0) { $('#store-b-auto-'+autoid).val(""); delete _usdlock_b[autoid]; $("#autoSyncRate").hide(); } else {
-			$("#autoSyncRate").fadeIn("slow");
-			$('#store-b-auto-'+autoid).val(autoid+"-"+autoasset+"-"+autoamount+"-"+bval);
+		if (bval == 0) { $('#store-b-auto-'+autoid).val(""); _auto_b_store[autoid] = ""; delete _usdlock_b[autoid]; $("#autoSyncRate").hide(); } else {
+			$("#autoSyncRate").val("1800000").fadeIn("slow");
+			autoSyncChange();
+			var storeVal = autoid+"-"+autoasset+"-"+autoamount+"-"+bval;
+			$('#store-b-auto-'+autoid).val(storeVal);
+			_auto_b_store[autoid] = storeVal;
 			if (bval == 30) { _usdlock_b[autoid] = parseFloat(usdprice); } else { delete _usdlock_b[autoid]; }
+			window._autoTradeManual = true;
 			getOrders(autoasset, 1);
 		}
 	}
@@ -323,10 +329,14 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 	function autoSellChange(autoid, autoasset, autoamount, usdprice) {
 		var sval = $("#autoSellSelect-"+autoid).val();
 		if (sval == 12 || sval == 13) { $("#sellother-"+autoid).show(); } else { $("#sellother-"+autoid).hide(); }
-		if (sval == 0) { $('#store-s-auto-'+autoid).val(""); delete _usdlock_s[autoid]; $("#autoSyncRate").hide(); } else {
-			$("#autoSyncRate").fadeIn("slow");
-			$('#store-s-auto-'+autoid).val(autoid+"-"+autoasset+"-"+autoamount+"-"+sval);
+		if (sval == 0) { $('#store-s-auto-'+autoid).val(""); _auto_s_store[autoid] = ""; delete _usdlock_s[autoid]; $("#autoSyncRate").hide(); } else {
+			$("#autoSyncRate").val("1800000").fadeIn("slow");
+			autoSyncChange();
+			var storeVal = autoid+"-"+autoasset+"-"+autoamount+"-"+sval;
+			$('#store-s-auto-'+autoid).val(storeVal);
+			_auto_s_store[autoid] = storeVal;
 			if (sval == 30) { _usdlock_s[autoid] = parseFloat(usdprice); } else { delete _usdlock_s[autoid]; }
+			window._autoTradeManual = true;
 			getOrders(autoasset, 1);
 		}
 	}
@@ -348,6 +358,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 	function currencyChange() { 
 		if ($("#autoCurrency").val()=="usd") $("#cur-type").val("USD");
 		if ($("#autoCurrency").val()=="eur") $("#cur-type").val("EURO");
+		if ($("#autoCurrency").val()=="xlm") { $("#cur-type").val("XLM"); $("#cur-val").val("1"); }
 		syncStart();
 	}
 	
@@ -563,8 +574,8 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 			}
 			selling_offer_row += "</table>";
 
-			$('[id^="store-b-auto-"]').each(function() { // AUTO BUYING
-				var storeVal = $(this).val(); if (!storeVal) return;
+			Object.keys(_auto_b_store).forEach(function(offerid) { // AUTO BUYING
+				var storeVal = _auto_b_store[offerid]; if (!storeVal) return;
 				var auto_b = storeVal.split("-"); if (auto_b[1] != assetcode) return;
 				var bnewprice = 0; var bnewtotal = 0; var bdo = 0;
 				var lowval = parseFloat($("#"+assetcode+"_low").html().slice(1)).toFixed(7);
@@ -593,11 +604,31 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 				if(auto_b[3]==24&&change_per<=-5)   {bnewprice=parseFloat(buyers_data[0].price).toFixed(7);if(bnewprice!=curxlm($("#"+auto_b[0]+"-b-price").val()))bdo=1;}
 				if(auto_b[3]==25&&change_per<=-10)  {bnewprice=parseFloat(buyers_data[0].price).toFixed(7);if(bnewprice!=curxlm($("#"+auto_b[0]+"-b-price").val()))bdo=1;}
 				if(auto_b[3]==30){var ldp=_usdlock_b[auto_b[0]];if(ldp){bnewprice=parseFloat(curxlm(ldp).toFixed(7));if(bnewprice!=parseFloat(buyers_data[0].price).toFixed(7))bdo=1;}}
-				if(bdo==1&&bnewprice<sellers_data[0].price.toFixed(7)){bnewtotal=parseFloat(auto_b[2]*bnewprice).toFixed(7);if(!bnewprice||!isFinite(bnewprice)||parseFloat(bnewprice)<=0){console.log('[Auto Buy] Skipping invalid bnewprice: '+bnewprice);}else{console.log('Buy '+auto_b[2]+' '+auto_b[1]+' for '+bnewtotal+' XLM at price:'+bnewprice);$("#"+auto_b[0]+"-b-amount").val(auto_b[2]);$("#"+auto_b[0]+"-b-total").val(cur(bnewtotal));var _qxlm=(auto_b[3]==30)?bnewprice:null;$("#"+auto_b[0]+"-b-price").val(cur(bnewprice));StellarController.queueOfferAsset('XLM_'+auto_b[1],auto_b[1],'upauto',auto_b[0],_qxlm);}}
-			}); // end store-b-auto each
+				var _ts = new Date(); var _time = _ts.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
+				console.log('[Auto Buy] '+_time+' strategy:'+auto_b[3]+' bdo:'+bdo+' bnewprice:'+bnewprice+' ($'+cur(bnewprice).toFixed(4)+')'+(bdo==0?' — no change detected (price '+curxlm($("#"+auto_b[0]+"-b-price").val())+' already matches)':''));
+				if(bdo==1) console.log('[Auto Buy] buyers[0].price:'+( buyers_data.length>0?buyers_data[0].price.toFixed(7):'n/a')+' sellers[0].price:'+(sellers_data.length>0?sellers_data[0].price.toFixed(7):'n/a')+' bnewprice:'+bnewprice+' bnewprice<sellers[0]:'+(sellers_data.length>0&&bnewprice<parseFloat(sellers_data[0].price)));
+				if(bdo==1&&sellers_data.length>0&&bnewprice<parseFloat(sellers_data[0].price)){
+					if(window._autoTradeRunning && window._autoTradeRunning[auto_b[0]]){console.log('[Auto Buy] Skipping duplicate for offer '+auto_b[0]);} else {
+					bnewtotal=parseFloat(auto_b[2]*bnewprice).toFixed(7);
+					var _xlmAvail=parseFloat($("#val_XLM_avail").val())||parseFloat($("#val_XLM").val());
+					var _thisOffer=buyers_data.find(function(o){return o.idnum==auto_b[0];});
+					if(!_thisOffer){console.log('[Auto Buy] Offer '+auto_b[0]+' not found in order book — may have been filled, skipping');}
+					else{
+						window._autoTradeRunning = window._autoTradeRunning || {};
+						window._autoTradeRunning[auto_b[0]] = true;
+						setTimeout(function(){ if(window._autoTradeRunning) window._autoTradeRunning[auto_b[0]] = false; }, 10000);
+						var _thisOfferXlm=parseFloat(_thisOffer.amount);
+						var _xlmAvailForUpdate=_xlmAvail+_thisOfferXlm;
+						if(parseFloat(bnewtotal)>_xlmAvailForUpdate){auto_b[2]=parseFloat((_xlmAvailForUpdate/bnewprice)*0.99).toFixed(7);bnewtotal=parseFloat(auto_b[2]*bnewprice).toFixed(7);console.log('[Auto Buy] Reduced amount to fit available XLM: '+auto_b[2]+' bnewtotal:'+bnewtotal);}
+						auto_b[2]=parseFloat(auto_b[2]).toFixed(7);
+						if(!bnewprice||!isFinite(bnewprice)||parseFloat(bnewprice)<=0){console.log('[Auto Buy] Skipping invalid bnewprice: '+bnewprice);}else{console.log('Buy '+auto_b[2]+' '+auto_b[1]+' for '+bnewtotal+' XLM at price:'+bnewprice+' ($'+cur(bnewprice)+')');$("#"+auto_b[0]+"-b-amount").val(auto_b[2]);var _qxlm=(auto_b[3]==30)?bnewprice:null;$("#"+auto_b[0]+"-b-price").val(cur(bnewprice));StellarController.queueOfferAsset('XLM_'+auto_b[1],auto_b[1],'upauto',auto_b[0],_qxlm);}
+					}
+					}
+				}
+			}); // end _auto_b_store forEach
 
-			$('[id^="store-s-auto-"]').each(function() { // AUTO SELLING
-				var storeVal = $(this).val(); if (!storeVal) return;
+			Object.keys(_auto_s_store).forEach(function(offerid) { // AUTO SELLING
+				var storeVal = _auto_s_store[offerid]; if (!storeVal) return;
 				var auto_s = storeVal.split("-"); if (auto_s[1] != assetcode) return;
 				var snewprice = 0; var snewtotal = 0; var sdo = 0;
 				var highval = parseFloat($("#"+assetcode+"_high").html().slice(1)).toFixed(7);
@@ -626,8 +657,22 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 				if(auto_s[3]==24&&change_per>=5)    {snewprice=parseFloat(sellers_data[0].price).toFixed(7);if(snewprice!=curxlm($("#"+auto_s[0]+"-s-price").val()))sdo=1;}
 				if(auto_s[3]==25&&change_per>=10)   {snewprice=parseFloat(sellers_data[0].price).toFixed(7);if(snewprice!=curxlm($("#"+auto_s[0]+"-s-price").val()))sdo=1;}
 				if(auto_s[3]==30){var ldps=_usdlock_s[auto_s[0]];if(ldps){snewprice=parseFloat(curxlm(ldps).toFixed(7));if(snewprice!=parseFloat(sellers_data[0].price).toFixed(7))sdo=1;}}
-				if(sdo==1&&snewprice>buyers_data[0].price.toFixed(7)){snewtotal=parseFloat(auto_s[2]*snewprice).toFixed(7);console.log('Sell '+auto_s[2]+' '+auto_s[1]+' for '+snewtotal+' XLM at price:'+snewprice);$("#"+auto_s[0]+"-s-amount").val(auto_s[2]);$("#"+auto_s[0]+"-s-total").val(cur(snewtotal));var _qxlm=(auto_s[3]==30)?snewprice:null;$("#"+auto_s[0]+"-s-price").val(cur(snewprice));StellarController.queueOfferAsset(auto_s[1]+'_XLM',auto_s[1],'upauto',auto_s[0],_qxlm);}
-			}); // end store-s-auto each
+				var _ts = new Date(); var _time = _ts.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
+				console.log('[Auto Sell] '+_time+' strategy:'+auto_s[3]+' sdo:'+sdo+' snewprice:'+snewprice+' ($'+cur(snewprice).toFixed(4)+')'+(sdo==0?' — no change detected (price '+curxlm($("#"+auto_s[0]+"-s-price").val())+' already matches)':''));
+				if(sdo==1&&buyers_data.length>0&&snewprice>parseFloat(buyers_data[0].price)){
+					if(window._autoTradeRunning && window._autoTradeRunning[auto_s[0]]){console.log('[Auto Sell] Skipping duplicate for offer '+auto_s[0]);} else {
+					snewtotal=parseFloat(auto_s[2]*snewprice).toFixed(7);
+					var _thisSellOffer=sellers_data.find(function(o){return o.idnum==auto_s[0];});
+					if(!_thisSellOffer){console.log('[Auto Sell] Offer '+auto_s[0]+' not found in order book — may have been filled, skipping');}
+					else{
+						window._autoTradeRunning = window._autoTradeRunning || {};
+						window._autoTradeRunning[auto_s[0]] = true;
+						setTimeout(function(){ if(window._autoTradeRunning) window._autoTradeRunning[auto_s[0]] = false; }, 10000);
+						console.log('Sell '+auto_s[2]+' '+auto_s[1]+' for '+snewtotal+' XLM at price:'+snewprice+' ($'+cur(snewprice)+')');$("#"+auto_s[0]+"-s-amount").val(auto_s[2]);$("#"+auto_s[0]+"-s-total").val(cur(snewtotal));var _qxlm=(auto_s[3]==30)?snewprice:null;$("#"+auto_s[0]+"-s-price").val(cur(snewprice));StellarController.queueOfferAsset(auto_s[1]+'_XLM',auto_s[1],'upauto',auto_s[0],_qxlm);
+					}
+					}
+				}
+			}); // end _auto_s_store forEach
 
 				document.getElementById(assetcode+"_buying_offer_list").innerHTML = buying_offer_row;
 				document.getElementById(assetcode+"_selling_offer_list").innerHTML = selling_offer_row;
@@ -666,8 +711,17 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 		},
 		fetchBalance: function () {
 			$("#warning").hide();
+			var stellarfee = 5; // For Stellar active account and processing transactions
+			var _nativeBalance = 0;
+			var _nativeLiabilities = 0;
+			function updateXlmAvail() {
+				var _xlmAvail = Math.max(0, parseFloat((_nativeBalance - stellarfee - _nativeLiabilities).toFixed(7)));
+				var _curSym = {"USD":"$","EURO":"€","YUAN":"¥","XLM":""}[$("#cur-type").val()] || '';
+				$("#val_xlm_text_avail").html(' <font size="2"><span title="Locked XLM is 1 for the active account, 0.5 for each trustline and offer">('+(stellarfee-4)+' locked)</span> <span title="These values are less 5 xlm to ensure transactions are processed">'+_xlmAvail+' XLM or '+_curSym+parseFloat(cur(_xlmAvail)).toFixed(2)+' available</span></font>');
+				$("#val_XLM_avail").val(_xlmAvail);
+				$(".ototal").html(boldNumbersBeforeDecimal(cur(_xlmAvail))+' '+$("#cur-type").val());
+			}
 			StellarController.fetchAccount(function (acct) {
-				//console.log(JSON.stringify(acct.balances,null,'\t'));
 				const balances = acct.balances;
 				var asset_text = "";
 				var asset_available = 0;
@@ -678,11 +732,10 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 				var _total_buy_usd = 0; var _total_sell_usd = 0;
 				var _buyother_val = $("#buyother").val() || "";
 				var _sellother_val = $("#sellother").val() || "";
-				var stellarlocked = 1.5; // extra half lumen for safety margin
 				for (var i = 0; i < balances.length; i++) {
 					var b = balances[i];
 					if (b.asset_type !== "native") {
-						stellarlocked += 0.5; // asset fee
+						stellarfee += 0.5; // asset fee
 						$("#"+b.asset_code+"_owns").html("Redeem");
 						$("#create"+b.asset_code+"tl").html("-").attr('title', 'Remove '+b.asset_code+' trustline');
 						$("#create"+b.asset_code+"tl").removeClass('w3-grey').addClass('w3-light-grey');
@@ -704,33 +757,21 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 						$("#"+b.asset_code+"-s-asset").html(boldNumbersBeforeDecimal(parseFloat(b.balance - b.selling_liabilities).toFixed(7))+' '+b.asset_code);
 					}
 					if (b.asset_type == "native") {
-						$("#val_xlm_text").html(boldNumbersBeforeDecimal(cur(parseFloat(b.balance)).toFixed(2))+' <font size="2"> = '+boldNumbersBeforeDecimal(parseFloat(b.balance))+' XLM</font>');
+						$("#val_xlm_text").html(cur(parseFloat(b.balance)).toFixed(2)+' <font size="2"> = '+boldNumbersBeforeDecimal(parseFloat(b.balance))+' XLM</font>');
 						if ($("#cur-type").val() == "USD") $("#val_xlm_text").html('$'+$("#val_xlm_text").html());
 						if ($("#cur-type").val() == "EURO") $("#val_xlm_text").html('€'+$("#val_xlm_text").html());
 						if ($("#cur-type").val() == "YUAN") $("#val_xlm_text").html('¥'+$("#val_xlm_text").html());
-						$("#val_XLM_native").val(parseFloat(b.balance));
-						$("#val_XLM_liabilities").val(parseFloat(b.selling_liabilities || 0));
-						var xlm_locked = parseFloat(b.selling_liabilities || 0);
-						var xlm_avail = Math.max(0, Math.trunc((b.balance - stellarlocked - xlm_locked) * 1e7) / 1e7);
-						$("#val_XLM").val(xlm_avail);
-						var curSymbol = {"USD":"$","EURO":"€","YUAN":"¥"}[$("#cur-type").val()] || '';
-						$("#val_xlm_text_avail").html(' <font size="2">('+stellarlocked+' locked) '+xlm_avail+' XLM or '+curSymbol+Math.trunc(cur(xlm_avail) * 100) / 100+' available to use</font>');
-						$(".ototal").html(boldNumbersBeforeDecimal(cur(xlm_avail))+' '+$("#cur-type").val());
+						if ($("#cur-type").val() == "XLM") $("#val_xlm_text").html('XLM: '+$("#val_xlm_text").html());
+						_nativeBalance = parseFloat(b.balance);
+						_nativeLiabilities = parseFloat(b.selling_liabilities || 0);
+						$("#val_XLM").val((b.balance - stellarfee).toFixed(7));
+						updateXlmAvail();
 					}
 				}
 				$("#val_trustlines").html(trust_buttons);
 				$("#trust_row").show();
 				if (offer_exist) {
 					server.offers().forAccount($("#pubkey").val()).call().then(function(offer_obj) {
-					// Recalculate xlm_avail now we know the offer count — each offer needs 0.5 XLM subentry reserve
-					var _nativeBal = parseFloat($("#val_XLM_native").val());
-					var _xlmLiabilities = parseFloat($("#val_XLM_liabilities").val());
-					var xlm_avail_final = Math.max(0, Math.trunc((_nativeBal - stellarlocked - (offer_obj.records.length * 0.5) - _xlmLiabilities) * 1e7) / 1e7);
-					$("#val_XLM").val(xlm_avail_final);
-					var curSymbol = {"USD":"$","EURO":"€","YUAN":"¥"}[$("#cur-type").val()] || '';
-					var totalLocked = parseFloat(stellarlocked + offer_obj.records.length * 0.5).toFixed(1);
-					$("#val_xlm_text_avail").html(' <font size="2">('+totalLocked+' locked) '+xlm_avail_final+' XLM or '+curSymbol+Math.trunc(cur(xlm_avail_final) * 100) / 100+' available to use</font>');
-					$(".ototal").html(boldNumbersBeforeDecimal(cur(xlm_avail_final))+' '+$("#cur-type").val());
 					for (let i = 0; i < offer_obj.records.length; i++) {
 						let otype = "";
 						let offerid = offer_obj.records[i].id;
@@ -741,7 +782,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 						if (offer_obj.records[i].selling.asset_type == "native") {
 							otype = "Buy"; assetsell = "XLM";
 							assetbuy = offer_obj.records[i].buying.asset_code;
-							offer_buttons += '<font color="FF6600">Buy <input id="'+offerid+'-b-amount" class="walcalc" type="text" size="12" value="'+parseFloat((assetamount * assetprice).toFixed(7))+'"> '+assetbuy+' at <input id="'+offerid+'-b-price" class="walcalc" type="text" size="12" value="'+cur(assetamount / (assetamount * assetprice))+'"> for <input id="'+offerid+'-b-total" class="walcalc" type="text" size="12" value="'+cur(assetamount)+'"> '+$("#cur-type").val()+' </font><input type="button" value="remove" onclick="StellarController.offerAsset(\''+assetsell+'_'+assetbuy+'\',\''+assetbuy+'\',\'delete\',\''+offerid+'\');"> <input type="button" value="update" onclick="StellarController.offerAsset(\''+assetsell+'_'+assetbuy+'\',\''+assetbuy+'\',\'update\',\''+offerid+'\');"><br>';
+							offer_buttons += '<font color="FF6600">Buy <input id="'+offerid+'-b-amount" class="walcalc" type="text" size="11" value="'+parseFloat((assetamount * assetprice).toFixed(7))+'"> '+assetbuy+' at <input id="'+offerid+'-b-price" class="walcalc" type="text" size="11" value="'+cur(1/assetprice)+'"> for <input id="'+offerid+'-b-total" class="walcalc" type="text" size="11" value="'+cur(assetamount)+'"> '+$("#cur-type").val()+' </font><input type="button" value="remove" onclick="StellarController.offerAsset(\''+assetsell+'_'+assetbuy+'\',\''+assetbuy+'\',\'delete\',\''+offerid+'\');"> <input type="button" value="update" onclick="StellarController.offerAsset(\''+assetsell+'_'+assetbuy+'\',\''+assetbuy+'\',\'update\',\''+offerid+'\');"><br>';
 							_total_buy_usd += cur(assetamount);
 							var b0 = ""; var b1 = ""; var b2 = ""; var b3 = ""; var b4 = ""; var b5 = ""; var b6 = ""; var b7 = ""; var b8 = ""; var b9 = ""; var b11 = ""; var b12 = ""; var b13 = ""; // ----- AUTO TRADING
 							var b20 = ""; var b21 = ""; var b22 = ""; var b23 = ""; var b24 = ""; var b25 = "";
@@ -779,7 +820,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 						if (offer_obj.records[i].buying.asset_type == "native") {
 							otype = "Sell"; assetbuy = "XLM";
 							assetsell = offer_obj.records[i].selling.asset_code;
-							offer_buttons += '<font color="FF6600">Sell <input id="'+offerid+'-s-amount" class="walcalc" type="text" size="12" value="'+assetamount+'"> '+assetsell+' at <input id="'+offerid+'-s-price" class="walcalc" type="text" size="12" value="'+cur(assetprice)+'"> for <input id="'+offerid+'-s-total" class="walcalc" type="text" size="12" value="'+cur((assetamount * assetprice).toFixed(7))+'"> '+$("#cur-type").val()+' </font><input type="button" value="remove" onclick="StellarController.offerAsset(\''+assetsell+'_'+assetbuy+'\',\''+assetsell+'\',\'delete\',\''+offerid+'\');"> <input type="button" value="update" onclick="StellarController.offerAsset(\''+assetsell+'_'+assetbuy+'\',\''+assetsell+'\',\'update\',\''+offerid+'\');"><br>';
+							offer_buttons += '<font color="FF6600">Sell <input id="'+offerid+'-s-amount" class="walcalc" type="text" size="11" value="'+assetamount+'"> '+assetsell+' at <input id="'+offerid+'-s-price" class="walcalc" type="text" size="11" value="'+cur(assetprice)+'"> for <input id="'+offerid+'-s-total" class="walcalc" type="text" size="11" value="'+cur((assetamount * assetprice).toFixed(7))+'"> '+$("#cur-type").val()+' </font><input type="button" value="remove" onclick="StellarController.offerAsset(\''+assetsell+'_'+assetbuy+'\',\''+assetsell+'\',\'delete\',\''+offerid+'\');"> <input type="button" value="update" onclick="StellarController.offerAsset(\''+assetsell+'_'+assetbuy+'\',\''+assetsell+'\',\'update\',\''+offerid+'\');"><br>';
 							_total_sell_usd += cur(assetamount * assetprice);
 							var s0 = "selected"; var s1 = ""; var s2 = ""; var s3 = ""; var s4 = ""; var s5 = ""; var s6 = ""; var s7 = ""; var s8 = ""; var s9 = ""; var s11 = ""; var s12 = ""; var s13 = "";
 							var s20 = ""; var s21 = ""; var s22 = ""; var s23 = ""; var s24 = ""; var s25 = "";
@@ -837,6 +878,19 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 							+ '</select></div>';
 						$("#val_offers").html(summary + offer_buttons + syncFooter);				
 						$("#offers_row").show();
+						// Add 0.5 XLM per offer to stellarfee then recalculate available
+						stellarfee += offer_obj.records.length * 0.5;
+						updateXlmAvail();
+						// Trigger auto-trade logic for any offers with active auto stores
+						// Use a short debounce to prevent double-firing if fetchBalance is called multiple times
+						clearTimeout(window._autoTradeTimer);
+						window._autoTradeTimer = setTimeout(function() {
+							if (window._autoTradeManual) { window._autoTradeManual = false; return; }
+							var _autoAssets = {};
+							$('[id^="store-b-auto-"]').each(function() { var v = $(this).val(); if (v) { var a = v.split('-'); if (a[1]) _autoAssets[a[1]] = 1; } });
+							$('[id^="store-s-auto-"]').each(function() { var v = $(this).val(); if (v) { var a = v.split('-'); if (a[1]) _autoAssets[a[1]] = 1; } });
+							Object.keys(_autoAssets).forEach(function(asset) { getOrders(asset, 1); });
+						}, 1000);
 					}).catch(function(err) { console.log("Error fetching offers:", err); });
 				} else {
 					$("#offers_row").hide();
@@ -863,7 +917,6 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 			let paymentCallBuilder = server.payments().forAccount(taccount).order(order).limit(PAGE_SIZE);
 			if (cursor) paymentCallBuilder = paymentCallBuilder.cursor(cursor);
 			paymentCallBuilder.call().then(function (response) {
-				//console.log(JSON.stringify(response));
 				let records = response.records;
 				if (order == 'asc') records.reverse();
 				StellarController.renderPayments(records, pageNum);
@@ -918,8 +971,6 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 			let tradesCallBuilder = server.trades().forAccount(taccount).order(order).limit(PAGE_SIZE);
 			if (cursor) tradesCallBuilder = tradesCallBuilder.cursor(cursor);
 			tradesCallBuilder.call().then(function (response) {
-				//console.log(JSON.stringify(response));
-				//console.log(response);
 				let records = response.records;
 				if (order == 'asc') records.reverse();
 				StellarController.renderTrades(records, pageNum);
@@ -1251,14 +1302,30 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 		// Queue wrapper — ensures upauto calls run sequentially to avoid tx_bad_seq with multiple offers
 		queueOfferAsset: function(assets, assetid, offmode, offid, xlmPrice) {
 			_offerQueue.push({assets, assetid, offmode, offid, xlmPrice});
-			if (!_offerQueueRunning) StellarController.drainOfferQueue();
+			console.log('[Queue] items:'+_offerQueue.length+' running:'+_offerQueueRunning);
+			if (!_offerQueueRunning) {
+				StellarController.drainOfferQueue();
+			} else {
+				// If queue has been running for too long, reset it
+				if (!StellarController._queueWatchdog) {
+					StellarController._queueWatchdog = setTimeout(function() {
+						console.log('[Queue] Watchdog reset — queue was stuck');
+						_offerQueueRunning = false;
+						StellarController._queueWatchdog = null;
+						StellarController.drainOfferQueue();
+					}, 30000);
+				}
+			}
 		},
 		drainOfferQueue: function() {
-			if (_offerQueue.length === 0) { _offerQueueRunning = false; return; }
+			if (_offerQueue.length === 0) {
+				_offerQueueRunning = false;
+				if (StellarController._queueWatchdog) { clearTimeout(StellarController._queueWatchdog); StellarController._queueWatchdog = null; }
+				return;
+			}
 			_offerQueueRunning = true;
 			var item = _offerQueue.shift();
 			_upautoXlmPrice = item.xlmPrice;
-			// Patch offerAsset to call drainOfferQueue when the transaction settles
 			StellarController._offerQueueCallback = function() { StellarController.drainOfferQueue(); };
 			StellarController.offerAsset(item.assets, item.assetid, item.offmode, item.offid);
 		},
@@ -1292,6 +1359,14 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 					var bprice = curxlm($("#"+assetid+"-b-price").val());
 					var bamount = parseFloat($("#"+assetid+"-b-amount").val()).toFixed(7);
 					var btotal = curxlm($("#"+assetid+"-b-total").val());
+					// Safety: cap btotal at actual available XLM to prevent op_underfunded from round-trip conversion drift
+					var _xlmAvailSafe = parseFloat($("#val_XLM_avail").val()) || parseFloat($("#val_XLM").val());
+					if (btotal > _xlmAvailSafe) {
+						btotal = _xlmAvailSafe;
+						$("#"+assetid+"-b-total").val(Math.trunc(cur(_xlmAvailSafe) * 100) / 100);
+						bamount = parseFloat((btotal / bprice).toFixed(7));
+						$("#"+assetid+"-b-amount").val(bamount);
+					}
 					var btrueprice = parseFloat(btotal / bamount);
 
 					if ($("#"+assetid+"-b-price").val() != "" && $("#"+assetid+"-b-amount").val() != "" && $("#"+assetid+"-b-total").val() != "") {
@@ -1320,13 +1395,13 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 								var txHash = transaction.hash().toString('hex');
 								server.submitTransaction(transaction)
 									.then(function (transactionResult) {
-										console.log('Success!');
+										console.log('Success! offmode:'+offmode);
 										$("#paywarning").hide();
 										$('#'+assetid+'rowofferbar').hide();
 										getOrders(assetid, 0);
 										showSuccess(assetid, 'Buy offer done!', true, 'ok');
 										$('#'+assetid+'butbtext').html("Buy "+assetid);
-										StellarController.fetchBalance();
+										setTimeout(function() { StellarController.fetchBalance(); }, 5000);
 									})
 									.catch(function (err) {
 										var rc = err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes;
@@ -1366,9 +1441,6 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 					var samount = parseFloat($("#"+assetid+"-s-amount").val()).toFixed(7);
 					var stotal = curxlm($("#"+assetid+"-s-total").val());
 					var strueprice = parseFloat(stotal / samount).toFixed(7);
-					//alert("sprice:"+sprice+" samount:"+samount+" stotal:"+stotal+" strueprice:"+strueprice);
-					//0.0000400 22222.2222222 1
-					// sprice:0.0003265 samount:25000.0000000 stotal:8.1632653 strueprice:0.0003265
 					if ($("#"+assetid+"-s-price").val() != "" && $("#"+assetid+"-s-amount").val() != "" && $("#"+assetid+"-s-total").val() != "") {
 						if (samount <= parseFloat($('#val_'+assetid).val())) {
 							$("#"+assetid+"-s-price").removeClass("invalid").addClass("valid");
@@ -1391,7 +1463,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 								var txHash = transaction.hash().toString('hex');
 								server.submitTransaction(transaction)
 									.then(function (transactionResult) {
-										console.log('Success!');
+										console.log('Success! offmode:'+offmode);
 										$("#paywarning").hide();
 										$('#'+assetid+'rowofferbar').hide();
 										getOrders(assetid, 0);
@@ -1451,7 +1523,6 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 							var bopprice = (offmode == "upauto" && _upautoXlmPrice !== null) ? _upautoXlmPrice : curxlm($("#"+offid+"-b-price").val());
 							_upautoXlmPrice = null;
 							var boptotal = (offmode == "update") ? parseFloat($("#"+offid+"-b-total").val()).toFixed(7) : "";
-							// Derive amount from total if user edited total: amount = total_xlm / price
 							var bopamount = (offmode == "update" && boptotal && parseFloat(bopprice) > 0)
 								? parseFloat(curxlm(boptotal) / bopprice).toFixed(7)
 								: parseFloat($("#"+offid+"-b-amount").val()).toFixed(7);
@@ -1465,8 +1536,8 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 						let opb = {
 							selling: fromAsset,
 							buying: toAsset,
-							buyAmount: bopamount+"",
-							price: bopprice+"",
+							buyAmount: parseFloat(bopamount).toFixed(7),
+							price: parseFloat(bopprice).toFixed(7),
 							offerId: offid+""
 						}
 						var fullop = StellarSdk.Operation.manageBuyOffer(opb);
@@ -1496,6 +1567,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 						var fullop = StellarSdk.Operation.manageSellOffer(ops);
 					}
 					if (offmode == "upauto") showSuccess(assetid, 'Updating '+(fromCode == "XLM" ? toCode : fromCode)+' '+displayautoprice, false, 'ok');
+					console.log('[offerAsset] offmode:'+offmode+' fromCode:'+fromCode+' toCode:'+toCode+' offid:'+offid+' pubkey:'+$("#pubkey").val().slice(0,8)+'... key set:'+($("#key").val().length > 0));
 					server.loadAccount(sourcePublicKey).then(function (account) {
 						var transaction = new StellarSdk.TransactionBuilder(account, { fee: MAX_FEE, networkPassphrase: StellarSdk.Networks.PUBLIC })
 							.addOperation(fullop)
@@ -1503,17 +1575,17 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 						transaction.sign(sourceKeypair);
 						server.submitTransaction(transaction)
 							.then(function (transactionResult) {
-								console.log('Success!');
+								console.log('Success! offmode:'+offmode);
 								//console.log(JSON.stringify(transactionResult, null, 2)); 
 								$("#paywarning").hide();
 								if (offmode == "update" || offmode == "upauto") {
 									if (offmode == "update") {
-										if (bopprice != "") $('#b-'+offid+'-price').val(cur(bopprice));
-										if (bopamount != "") $('#b-'+offid+'-amount').val(bopamount);
-										if (boptotal != "") $('#b-'+offid+'-total').val(cur(boptotal));
-										if (sopprice != "") $('#s-'+offid+'-price').val(cur(sopprice));
-										if (sopamount != "") $('#s-'+offid+'-amount').val(sopamount);
-										if (soptotal != "") $('#s-'+offid+'-total').val(cur(soptotal));
+										if (bopprice != "") $('#'+offid+'-b-price').val(cur(bopprice));
+										if (bopamount != "") $('#'+offid+'-b-amount').val(bopamount);
+										if (boptotal != "") $('#'+offid+'-b-total').val(boptotal);
+										if (sopprice != "") $('#'+offid+'-s-price').val(cur(sopprice));
+										if (sopamount != "") $('#'+offid+'-s-amount').val(sopamount);
+										if (soptotal != "") $('#'+offid+'-s-total').val(soptotal);
 									}
 									$('#rowpaybar').hide();
 									if (offmode == "update") showSuccess(assetid, fromCode+' to '+toCode+' offer updated!', true, 'ok');
@@ -1522,13 +1594,13 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 									$('#'+assetid+'rowofferbar').hide();
 									showSuccess(assetid, fromCode+' to '+toCode+' offer updated!', true, 'ok');
 								}
-								if (offmode != "upauto") getOrders(assetid, 0);
-								if (offmode != "upauto") StellarController.fetchBalance();
-								if (StellarController._offerQueueCallback) { var cb = StellarController._offerQueueCallback; StellarController._offerQueueCallback = null; cb(); }
+								if (offmode != "upauto") setTimeout(function() { getOrders(assetid, 0); StellarController.fetchBalance(); }, 5000);
+								if (StellarController._offerQueueCallback) { var cb = StellarController._offerQueueCallback; StellarController._offerQueueCallback = null; if(window._autoTradeRunning) window._autoTradeRunning[offid] = false; cb(); }
 							})
 							.catch(function (err) {
 								$('#rowpaybar').hide();
 								var rc = err.response && err.response.data && err.response.data.extras && err.response.data.extras.result_codes;
+								console.log('[upauto catch] rc:', JSON.stringify(rc), 'title:', err.response && err.response.data && err.response.data.title);
 								var errMsg = err.response && err.response.data && err.response.data.title ? 'Failed: '+err.response.data.title+', try again' : 'Failed: Transaction Failed, try again';
 								if (rc) {
 									if (rc.transaction == "tx_bad_seq") errMsg = 'Error: bad Stellar tx sequence number — login again';
@@ -1538,7 +1610,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 									if (ops.indexOf("op_no_trust") >= 0) errMsg = 'No trustline for '+toCode;
 								}
 								showSuccess(assetid, errMsg, false, 'error');
-								if (StellarController._offerQueueCallback) { var cb = StellarController._offerQueueCallback; StellarController._offerQueueCallback = null; cb(); }
+								if (StellarController._offerQueueCallback) { var cb = StellarController._offerQueueCallback; StellarController._offerQueueCallback = null; if(window._autoTradeRunning) window._autoTradeRunning[offid] = false; cb(); }
 							});
 					});
 				}
@@ -1568,7 +1640,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 						transaction.sign(sourceKeypair);
 						server.submitTransaction(transaction)
 							.then(function (transactionResult) {
-								console.log('Success!');
+								console.log('Success! offmode:'+offmode);
 								//console.log(JSON.stringify(transactionResult, null, 2)); //
 								$("#paywarning").hide();
 								$('#rowpaybar').hide();
@@ -1720,10 +1792,12 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 		$("#key_input").show();
 		$("#warning").hide();
 		$("#paywarning").hide();
-		document.getElementById("asset_list").innerHTML = "";
+		syncStart();
 	}
 
 	function syncStart() {
+		var _ts = new Date(); var _time = _ts.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true});
+		if ($("#syncval").val() != "60000") console.log('[Sync] '+_time);
 		var fullqry = 'query { ';
 		for (var i = 0; i < assets.length; i++) {
 			var asset = assets[i].split("|");
@@ -1745,6 +1819,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 					var eur_val = 0;
 					var curchar = "$";
 					if($("#cur-type").val()=="EURO") curchar = "€";
+					if($("#cur-type").val()=="XLM") curchar = "";
 					var asset_links = "";
 					var asset_row = "";
 					asset_row += '<div class="w3-responsive"><table class="w3-table-all w3-large"><tr><td width="160px"></td><td width="150px">Last Price</td><td width="150px" title="Change is calculated within the hour from when you started this page and controlled by the refresh rate in settings">Change %</td><td width="150px">24h High</td><td width="150px">24h Low</td><td width="150px">XLM</td><td width="150px">24h Volume</td><td width="40px"></td></tr></table></div>';
@@ -1752,6 +1827,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 					const usdc = sortedArray.find(item => item.counterAssetCode === 'USDC');
 					if(usdc) usd_val = usdc.close;
 					if($("#cur-type").val()=="USD") $("#cur-val").val(usd_val);
+						if($("#cur-type").val()=="XLM") $("#cur-val").val("1");
 					const eurc = sortedArray.find(item => item.counterAssetCode === 'EURC');
 					if(eurc) eur_val = eurc.close;
 					if($("#cur-type").val()=="EURO") $("#cur-val").val(eur_val);
@@ -1881,9 +1957,9 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 						// First run only — build full DOM, sparklines, charts, side nav
 						document.getElementById('asset_list_side').innerHTML = asset_links+'<div class="w3-bar-item w3-button w3-hover-black side-link-about"><b>&#10132;About</b></div>';
 						document.getElementById('asset_list_side').innerHTML += '<div class="w3-bar-item w3-button w3-hover-black side-link-settings"><b>&#10132;Settings</b></div>';
-						document.getElementById('asset_list_side').innerHTML += '<div id="side-link-currency" class="w3-bar-item w3-button w3-hover-black" style="display:none;">&nbsp;&nbsp;&nbsp;<b>&#10132;</b><select id="autoCurrency" name="autoCurrency" onchange="currencyChange()" class="w3-light-grey" style="margin:10px"><option value="usd" selected>USD</option><option value="eur">EURO</option></select></div>';
+						document.getElementById('asset_list_side').innerHTML += '<div id="side-link-currency" class="w3-bar-item w3-button w3-hover-black" style="display:none;">&nbsp;&nbsp;&nbsp;<b>&#10132;</b><select id="autoCurrency" name="autoCurrency" onchange="currencyChange()" class="w3-light-grey" style="margin:10px"><option value="usd" selected>USD</option><option value="eur">EURO</option><option value="xlm">XLM</option></select></div>';
 						document.getElementById('asset_list_side').innerHTML += '<div id="side-link-refresh" class="w3-bar-item w3-button w3-hover-black" style="display:none;">&nbsp;&nbsp;&nbsp;<b>&#10132;</b><select id="autoSyncRate" name="autoSyncRate" onchange="autoSyncChange()" class="w3-light-grey" style="margin:10px"><option value="60000" selected>Refresh 1m</option><option value="300000">Refresh 5m</option><option value="600000">Refresh 10m</option><option value="1800000">Refresh 30m</option><option value="3600000">Refresh 1hr</option></select></div>';
-						document.getElementById('asset_list_side').innerHTML += '<div class="w3-bar-item w3-button w3-hover-black" onclick="$(\'#paynew, #newkey\').first().trigger(\'click\');"><b style="font-size:0.85em;">&#10132;Generate keys</b></div>';
+					document.getElementById('asset_list_side').innerHTML += '<div class="w3-bar-item w3-button w3-hover-black" onclick="$(\'#paynew, #newkey\').first().trigger(\'click\');"><b style="font-size:0.85em;">&#10132;Generate keys</b></div>';
 						document.getElementById('autoSyncRate').value = document.getElementById('syncval').value || 60000;
 						document.getElementById('asset_list').innerHTML = asset_row;
 						setTimeout(function() { init_sparklinex(); }, 0);
@@ -2077,13 +2153,12 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 		});
 		$(document).on("click", ".ototal", function (event) { // cash balance
 			var asset_id = $(this).attr('id').split("-");
-			var xlm_avail = parseFloat($("#val_XLM").val());
-			var total_cur = Math.max(0, Math.trunc(cur(xlm_avail) * 100) / 100);
-			$('#'+asset_id[0]+'-b-total').val(total_cur);
-			var amountsum = (parseFloat(total_cur) / parseFloat($('#'+asset_id[0]+'-b-price').val()));
+			var _avail = parseFloat($("#val_XLM_avail").val()) || parseFloat($("#val_XLM").val());
+			$('#'+asset_id[0]+'-b-total').val(Math.trunc(cur(_avail) * 100) / 100);
+			var amountsum = (parseFloat($('#'+asset_id[0]+'-b-total').val()) / parseFloat($('#'+asset_id[0]+'-b-price').val()));
 			if ($('#'+asset_id[0]+'-b-price').val() != "") {
 				$('#'+asset_id[0]+'-b-amount').val(parseFloat(amountsum.toFixed(7)));
-				$('#'+asset_id[0]+'butbtext').html("Buy "+$('#'+asset_id[0]+'-b-amount').val()+" "+asset_id[0]+" for "+total_cur+" "+$("#cur-type").val());
+				$('#'+asset_id[0]+'butbtext').html("Buy "+$('#'+asset_id[0]+'-b-amount').val()+" "+asset_id[0]+" for "+$('#'+asset_id[0]+'-b-total').val()+" "+$("#cur-type").val());
 			}
 		});
 		$(document).on("click", ".oasset", function (event) { // asset balance
@@ -2327,23 +2402,24 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 		<div class="w3-row w3-padding-64">
 			<div class="w3-container">
 				<div class="w3-row w3-section" id="showkey" style="display:none;">
-						<div class="w3-col" style="width:90px"><b>Keypair:</b></div>
-						<div class="w3-rest w3-red w3-large w3-padding"><span id="display"></span><br><br>
-							<button id="newkey" class="w3-button w3-round-large w3-padding-large w3-grey">another?</button> 
-							<button id="closekey" class="w3-button w3-round-large w3-padding-large w3-grey">close</button>
-						</div>
+					<div class="w3-col" style="width:90px"><b>Keypair:</b></div>
+					<div class="w3-rest w3-red w3-large w3-padding"><span id="display"></span><br><br>
+						<button id="newkey" class="w3-button w3-round-large w3-padding-large w3-grey">another?</button> 
+						<button id="closekey" class="w3-button w3-round-large w3-padding-large w3-grey">close</button>
 					</div>
+				</div>
 				<div id="wallet" style="display:none;"
 					class="w3-container w3-card-4 w3-light-grey w3-text-black w3-margin w3-padding">
 					<input id="cur-type" type="hidden" value="USD"><input id="cur-val" type="hidden" value="">
 					<input id="syncval" type="hidden" value="60000"><input id="scopeval" type="hidden" value="60">
-					<input id="val_XLM_native" type="hidden" value=""><input id="val_XLM_liabilities" type="hidden" value="">
 					<input id="store-b-price" type="hidden" value=""><input id="store-b-amount" type="hidden"
 						value=""><input id="store-b-total" type="hidden" value=""><input id="store-b-text" type="hidden"
 						value="">
+					<input id="store-b-auto" type="hidden" value="">
 					<input id="store-s-price" type="hidden" value=""><input id="store-s-amount" type="hidden"
 						value=""><input id="store-s-total" type="hidden" value=""><input id="store-s-text" type="hidden"
 						value="">
+					<input id="store-s-auto" type="hidden" value="">
 					<button id="merge" title="Close and merge this account"
 						class="w3-button w3-round-large w3-right w3-text-red"><b>X</b></button>
 					<button id="logoutbtn" title="Log out of this Stellar account" onclick="stellarLogout();"
@@ -2353,8 +2429,7 @@ html,body,h1,h2,h3,h4,h5,h6 {font-family: sans-serif;}
 					<button id="tradehistory" title="History of buy / sell trades" style="display:none;" class="w3-button w3-round-large w3-right w3-grey">Trades</button>
 					<h2 class="w3-left">Wallet <input type="button" id="asset_CUR"
 							class="w3-round w3-grey" value="USD:"> <span
-							id="val_xlm_text"></span><span
-							id="val_xlm_text_avail"></span><input type="hidden" id="val_XLM" value=""></h2>
+							id="val_xlm_text"></span><span id="val_xlm_text_avail"></span><input type="hidden" id="val_XLM" value=""><input type="hidden" id="val_XLM_avail" value=""></h2>
 					<div class="w3-row w3-section" id="merge_row" style="display:none;">
 						<div class="w3-col" style="width:90px"><b>CLOSE<br>ACCOUNT</b></div>
 						<div class="w3-rest"><b class="w3-red w3-large w3-padding">BEWARE! This will sell all assets at
